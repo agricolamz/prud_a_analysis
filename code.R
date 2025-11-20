@@ -57,12 +57,67 @@ distance_matrix <- clustering@distmat
 save(distance_matrix, file = "distance_matrix.Rdata")
 load("distance_matrix.Rdata")
 
-set.seed(42)
+distance_matrix |> 
+  hclust() |> 
+  ape::as.phylo() %>%
+  plot(tip.color = for_analysis$color[match(.$tip.label, for_analysis$label)],
+       direction = "downwards",
+       cex = 0.5,
+       font = 2)
 
 distance_matrix |> 
   hclust() |> 
   ape::as.phylo() %>%
-  plot(tip.color = colors$color[match(.$tip.label, colors$language)],
+  plot(tip.color = for_analysis$color[match(.$tip.label, for_analysis$label)],
        direction = "downwards",
-       cex = 1.5,
+       type = "fan",
+       cex = 0.3,
        font = 2)
+
+distance_matrix |> 
+  hclust() |> 
+  as.dendrogram() |> 
+  cut(h = 500) ->
+  r
+
+length(r$lower)
+
+
+
+library(dendextend)
+par(mar=c(5.1,4.1,4.1,2.1)) 
+r$upper |> 
+  plot()
+
+par(mar=c(3,1,1,12)) 
+dend <- r$lower[[1]]
+labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
+plot(dend, horiz = TRUE)
+
+dend <- r$lower[[2]]
+labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
+plot(dend, horiz = TRUE)
+
+dend <- r$lower[[3]]
+labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
+plot(dend, horiz = TRUE)
+
+dend <- r$lower[[4]]
+labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
+plot(dend, horiz = TRUE)
+
+dend <- r$lower[[5]]
+labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
+plot(dend, horiz = TRUE)
+
+dend <- r$lower[[6]]
+labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
+plot(dend, horiz = TRUE)
+
+dend <- r$lower[[7]]
+labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
+plot(dend, horiz = TRUE)
+
+dend <- r$lower[[8]]
+labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
+plot(dend, horiz = TRUE)
