@@ -3,226 +3,120 @@ library(tidyverse)
 df <- read_csv("data.csv")
 
 df |> 
-  select(speaker, t0:t5) |> 
-  na.omit() |> 
-  mutate(id = 1:n()) |> 
-  pivot_longer(names_to = "type", values_to = "value", t0:t5) |> 
-  mutate(type = factor(type, levels = c("t0", "t1", "t2", "t3", "t4", "t5"))) |> 
-  ggplot(aes(type, value))+
-  geom_point()
-
-library(dtwclust)
-
-n_clust <- 7
-
-df |> 
   add_count(corpus) |> 
   filter(corpus != "ШМП без мужчин((",
          n >= 15) |> 
-  select(corpus, speaker, t0:t5, f0:f5) |> 
+  select(speaker, corpus, t0:t5, f0:f5) |> 
   na.omit() |> 
-  mutate(across(t0:t5, as.double),
-         across(f0:f5, as.double),
-         t1 = if_else(t1 == 0, 1, t1),
-         merge0 = (t0+1)*f0,
-         merge1 = t1*f1,
-         merge2 = t2*f2,
-         merge3 = t3*f3,
-         merge4 = t4*f4,
-         merge5 = t5*f5,
-         id = 1:n(),
-         label = str_c(corpus, "_", speaker, "_", id)) |> 
-  select(corpus, speaker, label, merge0:merge5) ->
-  for_analysis
+  mutate(across(t0:f5, as.double),
+         utterance_id = 1:n()) |> 
+  pivot_longer(names_to = "type", values_to = "value", t0:f5) |> 
+  mutate(obs_id = str_extract(type, "\\d"),
+         type = str_remove(type, "\\d")) |> 
+  pivot_wider(names_from = type, values_from = value) |> 
+  group_by(speaker, corpus) |> 
+  mutate(t_scaled = scale(t)[,1],
+         f_scaled = scale(f)[,1],
+         t_f_scaled = t*f_scaled,
+         label = str_c(corpus, "_", speaker, "_", utterance_id)) |> 
+  ungroup() ->
+  df_transformed
 
 set.seed(42)
-for_analysis |> 
+df_transformed |> 
   distinct(corpus) |> 
   mutate(color = sample(grDevices::colors()[grep('gr(a|e)y', grDevices::colors(), invert = T)], 
-                        23)) ->
+                        24)) ->
   colors
 
-for_analysis |> 
+df_transformed |> 
   left_join(colors) ->
-  for_analysis
+  df_transformed
+  
+df_transformed |> 
+  ggplot(aes(t, f, group = utterance_id))+
+  geom_line(data = df_transformed |> select(-corpus),
+            color = "grey70",
+            linewidth = 0.2)+
+  geom_line(linewidth = 0.2)+
+  facet_wrap(~corpus)+
+  theme_minimal()
 
-for_analysis |> 
-  select(-corpus, -speaker, -color) |> 
-  column_to_rownames("label") |> 
-  tsclust(k = n_clust,
-          distance = "L2", 
-          centroid = "pam",
-          seed = 3247, 
-          trace = TRUE,
-          control = partitional_control(nrep = 1L)) ->
-  clustering
+df_transformed |>
+  ggplot(aes(t, f_scaled, group = utterance_id))+
+  geom_line(data = df_transformed |> select(-corpus),
+            color = "grey80",
+            linewidth = 0.2)+
+  geom_line(linewidth = 0.2)+
+  facet_wrap(~corpus)+
+  theme_minimal()
 
-distance_matrix <- clustering@distmat
+df_transformed |>
+  ggplot(aes(obs_id, f_scaled, group = utterance_id))+
+  geom_line(data = df_transformed |> select(-corpus),
+            color = "grey80",
+            linewidth = 0.2)+
+  geom_line(linewidth = 0.2)+
+  facet_wrap(~corpus)+
+  theme_minimal()
 
-save(distance_matrix, file = "distance_matrix.Rdata")
-load("distance_matrix.Rdata")
+lapply(unique(df_transformed$utterance_id), FUN = function(i){
+    df_transformed |> 
+      filter(utterance_id == i) |> 
+      select(t, f) |> 
+      as.matrix()
+  }) ->
+  for_multivariate_clustering
 
-distance_matrix |> 
-  hclust() |> 
-  ape::as.phylo() %>%
-  plot(tip.color = for_analysis$color[match(.$tip.label, for_analysis$label)],
-       direction = "downwards",
-       cex = 0.5,
-       font = 2)
+df_transformed |> 
+  distinct(label) |> 
+  pull(label) ->
+  names(for_multivariate_clustering)
 
-distance_matrix |> 
-  hclust() |> 
-  ape::as.phylo() %>%
-  plot(tip.color = for_analysis$color[match(.$tip.label, for_analysis$label)],
-       direction = "downwards",
-       type = "fan",
-       cex = 0.3,
-       font = 2)
+start.time <- Sys.time()
+mvc <- tsclust(for_multivariate_clustering, 
+               k = 7L, 
+               distance = "gak", 
+               seed = 4242)
+end.time <- Sys.time()
+end.time - start.time
 
-distance_matrix |> 
-  hclust() |> 
-  as.dendrogram() |> 
-  cut(h = 70000) ->
-  r
+save(mvc, file = "mvc.RData")
+load("mvc.RData")
 
-length(r$lower)
-
-library(dendextend)
-par(mar=c(5.1,4.1,4.1,2.1)) 
-r$upper |> 
-  plot()
-
-par(mar=c(3,1,1,12)) 
-dend <- r$lower[[1]]
-labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
-plot(dend, horiz = TRUE)
-
-dend <- r$lower[[2]]
-labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
-plot(dend, horiz = TRUE)
-
-dend <- r$lower[[3]]
-labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
-plot(dend, horiz = TRUE)
-
-dend <- r$lower[[4]]
-labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
-plot(dend, horiz = TRUE)
-
-dend <- r$lower[[5]]
-labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
-plot(dend, horiz = TRUE)
-
-dend <- r$lower[[6]]
-labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
-plot(dend, horiz = TRUE)
-
-dend <- r$lower[[7]]
-labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
-plot(dend, horiz = TRUE)
-
-dend <- r$lower[[8]]
-labels_colors(dend) <- for_analysis$color[order.dendrogram(dend)]
-plot(dend, horiz = TRUE)
-
-library(tidytext)
-map(1:8, function(i){
-  r$lower[[i]] |> 
-    labels() |> 
-    tibble(corpus = _,
-           cluster = i) |> 
-    mutate(corpus = str_extract(corpus, ".*?\\_"),
-           corpus = str_remove(corpus, "\\_"))
-}) |> 
-  list_rbind() |> 
+df_transformed |>
+  left_join(tibble(cluster = mvc@cluster,
+                   label = names(mvc@datalist))) |> 
   count(corpus, cluster) |> 
-  mutate(cluster = as.character(cluster),
-         corpus = reorder_within(corpus, by = n, within = cluster)) |> 
-  ggplot(aes(n, corpus, label = n))+
-  geom_col()+
-  geom_label()+
-  facet_wrap(~cluster, scales = "free")+
+  mutate(clust_dist = str_c("c", cluster, ": ", n)) |> 
+  group_by(corpus) |> 
+  summarise(clust_dist = str_c(clust_dist, collapse = "; ")) ->
+  clust_dist_df
+
+df_transformed |>
+  left_join(tibble(cluster = mvc@cluster,
+                   label = names(mvc@datalist))) |> 
+  count(corpus, cluster) |> 
+  ggplot(aes(cluster, corpus, fill = n))+
+  geom_tile()+
+  geom_text(aes(label = n), color = "white")+
   theme_minimal()+
-  labs(y = NULL)+
-  scale_y_reordered()
+  labs(y = NULL)
+
+df_transformed |>
+  left_join(tibble(cluster = mvc@cluster,
+                   label = names(mvc@datalist))) |> 
+  left_join(clust_dist_df) |> 
+  mutate(cluster = as.factor(cluster),
+         corpus = str_c(corpus, "\n", clust_dist)) |> 
+  ggplot(aes(t, f_scaled, group = utterance_id, color = cluster))+
+  geom_line(data = df_transformed |> select(-corpus),
+            color = "grey80",
+            linewidth = 0.2)+
+  geom_line(linewidth = 0.2)+
+  facet_wrap(~corpus)+
+  theme_minimal()
+
+# average model -----------------------------------------------------------
 
 
-
-# averaged ----------------------------------------------------------------
-
-library(dtwclust)
-
-n_clust <- 7
-
-df |> 
-  add_count(corpus) |> 
-  filter(corpus != "ШМП без мужчин((",
-         n >= 15) |> 
-  select(corpus, speaker, t0:t5, f0:f5) |> 
-  na.omit() |> 
-  mutate(across(t0:t5, as.double),
-         across(f0:f5, as.double),
-         t0 = if_else(t0 == 0, 1, t0),
-         t1 = if_else(t1 == 0, 1, t1)) |> 
-  group_by(corpus, speaker) |>
-  mutate(t1 = scale(t1+1)[,1],
-         t2 = scale(t2+1)[,1],
-         t3 = scale(t3+1)[,1],
-         t4 = scale(t4+1)[,1],
-         t5 = scale(t5+1)[,1],
-         f0 = scale(f0+1)[,1],
-         f1 = scale(f1+1)[,1],
-         f2 = scale(f2+1)[,1],
-         f3 = scale(f3+1)[,1],
-         f4 = scale(f4+1)[,1],
-         f5 = scale(f5+1)[,1],
-         merge0 = t0*f0,
-         merge1 = t1*f1,
-         merge2 = t2*f2,
-         merge3 = t3*f3,
-         merge4 = t4*f4,
-         merge5 = t5*f5) |> 
-  na.omit() |> 
-  ungroup() |> 
-  mutate(id = 1:n(),
-          label = str_c(corpus, "_", speaker, "_", id)) ->
-  
-  
-  select(label, merge0:merge5) |> 
-  column_to_rownames("label") |> 
-  tsclust(k = n_clust,
-          distance = "L2", 
-          centroid = "pam",
-          seed = 3247, 
-          trace = TRUE,
-          control = partitional_control(nrep = 1L)) ->
-  clustering
-
-distance_matrix <- clustering@distmat
-
-set.seed(42)
-for_analysis |> 
-  distinct(corpus) |> 
-  mutate(color = sample(grDevices::colors()[grep('gr(a|e)y', grDevices::colors(), invert = T)], 
-                        23)) ->
-  colors
-
-for_analysis |> 
-  left_join(colors) ->
-  for_analysis
-
-
-distance_matrix |> 
-  hclust() |> 
-  ape::as.phylo() %>%
-  plot(tip.color = for_analysis$color[match(.$tip.label, for_analysis$label)],
-       direction = "rightwards",
-       font = 2)
-
-distance_matrix |> 
-  hclust() |> 
-  as.dendrogram() |> 
-  cut(h = 5) ->
-  r
-
-length(r)
